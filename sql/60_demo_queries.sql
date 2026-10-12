@@ -25,7 +25,7 @@ SELECT (SELECT count(*) FROM country)        AS country,
 
 
 -- ---------- 2. [m1_lt]: one drone, commercial part (M1) ----------
--- the same UUID is used in M0 (isdb_original) and in M2 (M2_lt)
+-- 'drone:1' -> deterministic UUID; the same id is used in M0 and later in M2
 SELECT d.drone_id, m.manufacturer, m.model_name, b.name AS branch,
        d.daily_rate, d.deposit_amount, d.status
 FROM drone_commercial d

@@ -1,8 +1,10 @@
-# DBVS1 = PostgreSQL (M0, M1), DBVS2 = MongoDB (M2), one-shot builders, pgAdmin, mongo-express.
+# DBVS1 (PostgreSQL: M0 + M1 fragments), a one-shot builder and pgAdmin.
 # Credentials come from .env (copy .env.example to .env).
 #
-#   docker compose up -d                    -> builds everything; pgAdmin http://localhost:5050, mongo-express http://localhost:8081
-#   docker compose run --rm migrate-mongo   -> rebuild / reset everything
+#   docker compose up -d                            -> starts the databases, pgAdmin on http://localhost:5050, mongoDB on http://localhost:8081
+#   docker compose run --rm setup                   -> rebuild / reset the databases
+#   docker compose --profile init up -d             -> does a full build.
+#   docker compose run --rm --no-deps migrate-mongo -> does the migration from relational to mongoDB
 name: isdb-lab1
 
 services:
@@ -24,16 +26,14 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
     ports: ["27017:27017"]
-    volumes:
-      - dbvs2-data:/data/db
-      - ./mongo:/work/mongo:ro   # demo: mongosh /work/mongo/demo.js
+    volumes: [dbvs2-data:/data/db]
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\""]
+      test: ["CMD-SHELL", "mongosh --host dbvs2 --quiet --eval \"db.adminCommand('ping').ok\""]
       interval: 2s
       retries: 30
 
-  # M0 + M1 (PostgreSQL)
   setup:
+    profiles: ["init"]
     image: postgres:17
     depends_on:
       dbvs1: { condition: service_healthy }
@@ -46,22 +46,16 @@ services:
     entrypoint: ["bash", "/work/scripts/build.sh"]
     restart: "no"
 
-  # M2 (MongoDB): M0 columns -> documents, split by the M1 fragments' id sets
-  migrate-mongo:
-    image: node:22
+  setup-mongo:
+    profiles: ["init"]
+    image: mongo:7
     depends_on:
-      setup: { condition: service_completed_successfully }
       dbvs2: { condition: service_healthy }
     environment:
-      PG_HOST: dbvs1
-      PG_PORT: "5432"
-      PG_USER: ${PG_USER}
-      PG_PASSWORD: ${PG_PASSWORD}
-      PG_DATABASE: isdb_original
       MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@dbvs2:27017/?authSource=admin
     volumes:
-      - ./mongo:/src:ro
-    command: ["bash", "-c", "mkdir -p /app && cp /src/migrate.js /src/package.json /app/ && cd /app && npm install --no-audit --no-fund --silent && node migrate.js"]
+      - ./mongo:/work/mongo:ro
+    entrypoint: ["bash", "-c", "mongosh \"$$MONGO_URI\" /work/mongo/build.js"]
     restart: "no"
 
   pgadmin:
@@ -77,6 +71,27 @@ services:
       - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
       - ./sql:/home/sql:ro   # Query Tool -> Open File -> /home/sql
 
+  migrate-mongo:
+    profiles: ["init"]
+    image: node:22
+    depends_on:
+      setup: { condition: service_completed_successfully }
+      dbvs2: { condition: service_healthy }
+    environment:
+      PG_HOST: dbvs1
+      PG_PORT: "5432"
+      PG_USER: ${PG_USER}
+      PG_PASSWORD: ${PG_PASSWORD}
+      PG_DATABASE: isdb_original
+      MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@dbvs2:27017/?authSource=admin
+      MONGO_DB_RECENT: M2_recent
+      MONGO_DB_OLDER: M2_older
+      INSPECTION_CUTOFF: "2025-12-15"
+    volumes:
+      - ./mongo:/src:ro
+    command: ["bash", "-c", "mkdir -p /app && cp /src/migrate.js /src/package.json /app/ && cd /app && npm install --no-audit --no-fund --silent && node migrate.js"]
+    restart: "no"
+
   mongo-express:
     image: mongo-express:latest
     depends_on:
@@ -85,7 +100,6 @@ services:
       ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@dbvs2:27017/?authSource=admin
       ME_CONFIG_BASICAUTH: "false"   # local lab only, no login prompt
     ports: ["8081:8081"]
-
 volumes:
   dbvs1-data:
   dbvs2-data:
