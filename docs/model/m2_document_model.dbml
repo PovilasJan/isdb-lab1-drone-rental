@@ -1,0 +1,59 @@
+// M2 - VERTICAL FRAGMENT 2: Fleet & Maintenance (MongoDB: M2_lt = LT, M2_lvee = LV+EE)
+// Document model: 3 collections, maintenance is EMBEDDED in the drone document.
+
+Project skyrent_m2 {
+  database_type: 'MongoDB'
+  Note: 'Collections drone_technical, employee, flight_log in databases M2_lt and M2_lvee.'
+}
+
+Table drone_technical [headercolor: #d35400] {
+  _id uuid [pk, note: 'drone_id - same UUID as M1.drone_commercial']
+  serial_number string [unique]
+  firmware_version string
+  total_flight_hours double
+  battery_cycles int
+  last_inspection_date date [null]
+  condition string [note: 'excellent | good | fair | poor']
+  maintenance "array[maintenance]" [note: 'embedded documents']
+  Note: 'Collection. Technical part of drone + embedded maintenance array.'
+}
+
+Table "maintenance (embedded)" [headercolor: #95a5a6] {
+  maintenance_id int
+  employee_id uuid
+  maintenance_date date
+  maintenance_type string
+  description string
+  cost double
+  downtime_hours double
+  Note: 'Not a collection - array element inside drone_technical.maintenance'
+}
+
+Table employee [headercolor: #1e8449] {
+  _id uuid [pk, note: 'employee_id']
+  branch_id uuid [note: 'reference to M1.branch (PostgreSQL)']
+  first_name string
+  last_name string
+  email string [unique]
+  role string
+  certification string [null]
+  hired_on date
+  Note: 'Collection'
+}
+
+Table flight_log [headercolor: #1e8449] {
+  _id int [pk, note: 'flight_id']
+  drone_id uuid
+  rental_id uuid [null, note: 'reference to M1.rental (PostgreSQL)']
+  started_at date
+  duration_min int
+  max_altitude_m int
+  distance_km double
+  battery_used_pct int
+  incident_reported bool
+  Note: 'Collection'
+}
+
+Ref: drone_technical.maintenance < "maintenance (embedded)".maintenance_id
+Ref: "maintenance (embedded)".employee_id > employee._id
+Ref: flight_log.drone_id > drone_technical._id

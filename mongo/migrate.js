@@ -1,9 +1,10 @@
 // M2 migration: PostgreSQL (M0) -> MongoDB, two horizontal fragments of
 // drone_technical (with embedded maintenance), employee, flight_log.
-//   M2_recent : drones with last_inspection_date >= INSPECTION_CUTOFF
-//   M2_older  : drones inspected before the cutoff, or never inspected (NULL)
-// maintenance is embedded in its drone's document, flight_log follows its drone,
-// employee is copied to both.
+// Derived horizontal fragmentation: the id sets come from the M1 fragments
+//   M2_lt   : drones of m1_lt.drone_commercial,   employees of m1_lt.branch
+//   M2_lvee : drones of m1_lvee.drone_commercial, employees of m1_lvee.branch
+// M2 has no country attribute. maintenance is embedded in its drone's
+// document, flight_log follows its drone.
 // Re-runnable: every target collection is dropped and rebuilt.
 
 const { Client, types } = require('pg');
@@ -19,10 +20,9 @@ const PG = {
 const MONGO_URI =
   process.env.MONGO_URI ??
   `mongodb://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@localhost:27017/?authSource=admin`;
-const CUTOFF = process.env.INSPECTION_CUTOFF; // YYYY-MM-DD
 const FRAGMENTS = [
-  { db: process.env.MONGO_DB_RECENT ?? 'M2_recent', recent: true },
-  { db: process.env.MONGO_DB_OLDER ?? 'M2_older', recent: false },
+  { db: 'M2_lt', m1: 'm1_lt' },
+  { db: 'M2_lvee', m1: 'm1_lvee' },
 ];
 
 // PostgreSQL -> BSON (uuid/char/varchar/text -> string, integers -> number, boolean -> boolean)
@@ -68,11 +68,11 @@ const maintenanceItem = {
 };
 
 // `fields` defines the SELECT column list (vertical projection), the validator and the document shape.
-// `split: true` = only the rows of the fragment's drones (keyed by drone_id); otherwise a full copy.
+// `split` = the column whose value must be in the fragment's id set (drone_id or branch_id).
 // `embed` = child table stored as an array field inside each document of this collection.
 const collections = [
   {
-    name: 'drone_technical', table: 'drone', pk: 'drone_id', split: true,
+    name: 'drone_technical', table: 'drone', pk: 'drone_id', split: 'drone_id',
     fields: {
       _id: 'uuid', serial_number: 'string', firmware_version: 'string',
       total_flight_hours: 'number', battery_cycles: 'int', last_inspection_date: 'date?',
@@ -86,7 +86,7 @@ const collections = [
     indexes: [{ key: { serial_number: 1 }, unique: true }, { key: { 'maintenance.employee_id': 1 } }],
   },
   {
-    name: 'employee', pk: 'employee_id',
+    name: 'employee', pk: 'employee_id', split: 'branch_id',
     fields: {
       _id: 'uuid', branch_id: 'uuid', first_name: 'string', last_name: 'string',
       email: 'string', role: 'string', certification: 'string?', hired_on: 'date',
@@ -95,7 +95,7 @@ const collections = [
     indexes: [{ key: { email: 1 }, unique: true }, { key: { branch_id: 1 } }],
   },
   {
-    name: 'flight_log', pk: 'flight_id', split: true,
+    name: 'flight_log', pk: 'flight_id', split: 'drone_id',
     fields: {
       _id: 'int', drone_id: 'uuid', rental_id: 'uuid?', started_at: 'date',
       duration_min: 'int', max_altitude_m: 'int', distance_km: 'number',
@@ -115,36 +115,44 @@ const references = [
   ['flight_log', 'drone_id', 'drone_technical'],
 ];
 
-// The fragment's drones. COALESCE makes never-inspected drones (NULL) count as "older".
-const FRAGMENT_DRONES = `"drone_id" IN (SELECT "drone_id" FROM "drone"
-  WHERE COALESCE("last_inspection_date" >= $1::date, false) = $2)`;
-
 const columns = (fields, skip) =>
   Object.keys(fields).filter((f) => f !== '_id' && f !== skip).map((f) => `"${f}"`).join(', ');
 
-async function main() {
-  if (!CUTOFF) throw new Error('INSPECTION_CUTOFF must be set (YYYY-MM-DD).');
+// id sets of one M1 fragment: which drones and branches belong to it
+async function m1Ids(database) {
+  const m1 = new Client({ ...PG, database });
+  await m1.connect();
+  try {
+    const drones = (await m1.query('SELECT drone_id FROM drone_commercial')).rows.map((r) => r.drone_id);
+    const branches = (await m1.query('SELECT branch_id FROM branch')).rows.map((r) => r.branch_id);
+    return { drone_id: drones, branch_id: branches };
+  } finally {
+    await m1.end();
+  }
+}
 
+async function main() {
   const pg = new Client(PG);
   const mongo = new MongoClient(MONGO_URI);
   await pg.connect();
   await mongo.connect();
 
   try {
-    for (const { db: dbName, recent } of FRAGMENTS) {
+    for (const { db: dbName, m1 } of FRAGMENTS) {
       const db = mongo.db(dbName);
+      const ids = await m1Ids(m1);
 
       for (const c of collections) {
         const { rows } = await pg.query(
-          `SELECT "${c.pk}" AS _id, ${columns(c.fields, c.embed?.field)} FROM "${c.table ?? c.name}"${c.split ? ` WHERE ${FRAGMENT_DRONES}` : ''}`,
-          c.split ? [CUTOFF, recent] : [],
+          `SELECT "${c.pk}" AS _id, ${columns(c.fields, c.embed?.field)} FROM "${c.table ?? c.name}" WHERE "${c.split}" = ANY($1::uuid[])`,
+          [ids[c.split]],
         );
 
         if (c.embed) {
           const e = c.embed;
           const { rows: items } = await pg.query(
-            `SELECT "drone_id", ${columns(e.fields)} FROM "${e.table}" WHERE ${FRAGMENT_DRONES} ORDER BY "${e.pk}"`,
-            [CUTOFF, recent],
+            `SELECT "drone_id", ${columns(e.fields)} FROM "${e.table}" WHERE "drone_id" = ANY($1::uuid[]) ORDER BY "${e.pk}"`,
+            [ids.drone_id],
           );
           const byDrone = new Map();
           for (const { drone_id, ...item } of items) {
@@ -169,10 +177,32 @@ async function main() {
         const found = await db.collection(parent).countDocuments({ _id: { $in: values } });
         if (found !== values.length) throw new Error(`${dbName}: ${child}.${field} has values missing in ${parent}`);
       }
+      console.log(`${dbName} <- ids of ${m1}: ${ids.drone_id.length} drones, ${ids.branch_id.length} branches`);
     }
+    await verify(pg, mongo);
   } finally {
     await pg.end();
     await mongo.close();
+  }
+}
+
+// Correctness: M2_lt + M2_lvee = M0 (no row lost, no row in both fragments)
+async function verify(pg, mongo) {
+  const checks = [
+    ['drone_technical', 'SELECT drone_id::text AS id FROM drone', (d) => d.collection('drone_technical').find({}, { projection: { _id: 1 } })],
+    ['maintenance', 'SELECT maintenance_id AS id FROM maintenance',
+      (d) => d.collection('drone_technical').aggregate([{ $unwind: '$maintenance' }, { $project: { _id: '$maintenance.maintenance_id' } }])],
+    ['employee', 'SELECT employee_id::text AS id FROM employee', (d) => d.collection('employee').find({}, { projection: { _id: 1 } })],
+    ['flight_log', 'SELECT flight_id AS id FROM flight_log', (d) => d.collection('flight_log').find({}, { projection: { _id: 1 } })],
+  ];
+  for (const [name, sql, cursor] of checks) {
+    const m0 = new Set((await pg.query(sql)).rows.map((r) => String(r.id)));
+    const frag = [];
+    for (const { db } of FRAGMENTS) frag.push(...(await cursor(mongo.db(db)).toArray()).map((x) => String(x._id)));
+    const unique = new Set(frag);
+    const ok = frag.length === m0.size && unique.size === m0.size && [...m0].every((id) => unique.has(id));
+    if (!ok) throw new Error(`FAILED ${name}: M0=${m0.size} fragments=${frag.length}`);
+    console.log(`OK  ${name.padEnd(16)} ${m0.size} = M2_lt + M2_lvee, disjoint`);
   }
 }
 

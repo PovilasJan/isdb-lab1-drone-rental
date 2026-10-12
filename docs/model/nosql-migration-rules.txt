@@ -1,7 +1,18 @@
-Iš drone paimami tik techniniai stulpeliai (serial_number, firmware_version, total_flight_hours, battery_cycles, last_inspection_date, condition) ir raktas drone_id.
+M2 transformavimo taisyklės (reliacinis M0 -> MongoDB)
 
-Dronai skirstomi pagal last_inspection_date (compose faile 2025-12-15).
-flight_log įrašai priskiriami į horizontalų fragmentą pagal drone_id.
-employee nedalijamas, nes vienas darbuotojas gali atlikti daug techninių apžiūrų ir darbuotojų yra sąlyginai mažai.
+1. Iš drone paimami tik techniniai stulpeliai (serial_number, firmware_version, total_flight_hours,
+   battery_cycles, last_inspection_date, condition); drone_id (UUID) tampa dokumento _id.
+2. maintenance lentelė įterpiama (embedding) į drone_technical dokumentą kaip masyvas "maintenance"
+   (drone_id nebereikalingas - jį nusako tėvinis dokumentas).
+3. employee ir flight_log - atskiros kolekcijos, ryšys per nuorodas (employee_id, drone_id).
+   branch_id ir rental_id - nuorodos į M1 (PostgreSQL), UUID.
+4. CHECK / NOT NULL apribojimai pakeisti $jsonSchema validatoriais, UNIQUE - unikaliais indeksais.
 
-drone, flight_log ir employee yra kolekcijos, o maintenance įrašai yra įterpti į drone dokumentus kaip dokumentų masyvas.
+Horizontalus fragmentavimas (išvestinis, derived):
+- M2_lt gauna dronus, kurių drone_id yra m1_lt.drone_commercial, ir darbuotojus, kurių branch_id yra m1_lt.branch;
+- M2_lvee - analogiškai pagal m1_lvee.
+- flight_log ir maintenance keliauja kartu su savo dronu.
+- M2 neturi atributo "šalis" - fragmentas nustatomas pagal M1 identifikatorių aibes.
+
+Maršrutizavimas: objektas, esantis m1_lt, yra M2_lt (m1_lvee <-> M2_lvee).
+Globalus drono vaizdas = m1_x.drone_commercial JOIN M2_x.drone_technical pagal drone_id.
