@@ -5,6 +5,7 @@
 ```bash
 cp .env.example .env
 docker compose up -d
+docker compose run --rm --no-deps migrate-mongo
 ```
 
 pgAdmin: http://localhost:5050 (password from `.env`). Reset: `docker compose run --rm setup`.

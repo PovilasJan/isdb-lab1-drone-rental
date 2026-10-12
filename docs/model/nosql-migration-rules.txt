@@ -1,0 +1,7 @@
+Iš drone paimami tik techniniai stulpeliai (serial_number, firmware_version, total_flight_hours, battery_cycles, last_inspection_date, condition) ir raktas drone_id.
+
+Dronai skirstomi pagal last_inspection_date (compose faile 2025-12-15).
+flight_log įrašai priskiriami į horizontalų fragmentą pagal drone_id.
+employee nedalijamas, nes vienas darbuotojas gali atlikti daug techninių apžiūrų ir darbuotojų yra sąlyginai mažai.
+
+drone, flight_log ir employee yra kolekcijos, o maintenance įrašai yra įterpti į drone dokumentus kaip dokumentų masyvas.

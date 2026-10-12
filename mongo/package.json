@@ -1,0 +1,13 @@
+{
+  "name": "isdb-m2-migrate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Migrates the M2 (technical) fragment from PostgreSQL M0 to MongoDB",
+  "scripts": {
+    "migrate": "node migrate.js"
+  },
+  "dependencies": {
+    "mongodb": "^6.0.0",
+    "pg": "^8.11.0"
+  }
+}
