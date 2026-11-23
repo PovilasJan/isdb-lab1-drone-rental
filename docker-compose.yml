@@ -5,6 +5,9 @@
 #   docker compose run --rm setup                   -> rebuild / reset the databases
 #   docker compose --profile init up -d             -> does a full build.
 #   docker compose run --rm --no-deps migrate-mongo -> does the migration from relational to mongoDB
+#
+# Every port is published on 127.0.0.1 only. "5433:5432" would listen on all interfaces, and on a
+# machine with a public IP the default postgres/postgres password gets found by bots within hours.
 name: isdb-lab1
 
 services:
@@ -15,7 +18,7 @@ services:
     environment:
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
-    ports: ["5433:5432"]
+    ports: ["127.0.0.1:5433:5432"]
     volumes: [dbvs1-data:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${PG_USER}"]
@@ -27,7 +30,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
-    ports: ["27017:27017"]
+    ports: ["127.0.0.1:27017:27017"]
     volumes: [dbvs2-data:/data/db]
     healthcheck:
       test: ["CMD-SHELL", "mongosh --host dbvs2 --quiet --eval \"db.adminCommand('ping').ok\""]
@@ -68,7 +71,7 @@ services:
       PGADMIN_DEFAULT_PASSWORD: admin
       PGADMIN_CONFIG_SERVER_MODE: "False"
       PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
-    ports: ["5050:80"]
+    ports: ["127.0.0.1:5050:80"]
     volumes:
       - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
       - ./sql:/home/sql:ro   # Query Tool -> Open File -> /home/sql
@@ -100,7 +103,7 @@ services:
     environment:
       ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@dbvs2:27017/?authSource=admin
       ME_CONFIG_BASICAUTH: "false"   # local lab only, no login prompt
-    ports: ["8081:8081"]
+    ports: ["127.0.0.1:8081:8081"]
 
   # Lab 2: global operations over M1 + M2 (web UI on http://localhost:3000).
   # After editing app/ code: docker compose restart app
@@ -116,7 +119,7 @@ services:
       PG_USER: ${PG_USER}
       PG_PASSWORD: ${PG_PASSWORD}
       MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@dbvs2:27017/?authSource=admin
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     volumes:
       - ./app:/app
       - app-node-modules:/app/node_modules
