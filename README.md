@@ -15,6 +15,8 @@ pgAdmin: http://localhost:5050 (password from `.env`). Reset: `docker compose ru
 | `isdb_original` | M0 – original full DB |
 | `m1_lt` | M1-H1 – Lithuania |
 | `m1_lvee` | M1-H2 – Latvia + Estonia |
+| `M2_lt` | M2-H1 – Lithuania (MongoDB) |
+| `M2_lvee` | M2-H2 – Latvia + Estonia (MongoDB) |
 
 ## Diagrams
 
