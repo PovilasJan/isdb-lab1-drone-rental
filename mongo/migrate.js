@@ -1,7 +1,7 @@
 // M2 migration: PostgreSQL (M0) -> MongoDB, two horizontal fragments of
 // drone_technical (with embedded maintenance), employee, flight_log.
-//   M2_recent : drones with last_inspection_date >= INSPECTION_CUTOFF
-//   M2_older  : drones inspected before the cutoff, or never inspected (NULL)
+//   M2_lt   : drones at Lithuanian branches
+//   M2_lvee : drones at non-Lithuanian branches (Latvia and Estonia in the sample data)
 // maintenance is embedded in its drone's document, flight_log follows its drone,
 // employee is copied to both.
 // Re-runnable: every target collection is dropped and rebuilt.
@@ -19,10 +19,9 @@ const PG = {
 const MONGO_URI =
   process.env.MONGO_URI ??
   `mongodb://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@localhost:27017/?authSource=admin`;
-const CUTOFF = process.env.INSPECTION_CUTOFF; // YYYY-MM-DD
 const FRAGMENTS = [
-  { db: process.env.MONGO_DB_RECENT ?? 'M2_recent', recent: true },
-  { db: process.env.MONGO_DB_OLDER ?? 'M2_older', recent: false },
+  { db: process.env.MONGO_DB_LT ?? 'M2_lt', lithuania: true },
+  { db: process.env.MONGO_DB_LVEE ?? 'M2_lvee', lithuania: false },
 ];
 
 // PostgreSQL -> BSON (uuid/char/varchar/text -> string, integers -> number, boolean -> boolean)
@@ -115,36 +114,35 @@ const references = [
   ['flight_log', 'drone_id', 'drone_technical'],
 ];
 
-// The fragment's drones. COALESCE makes never-inspected drones (NULL) count as "older".
-const FRAGMENT_DRONES = `"drone_id" IN (SELECT "drone_id" FROM "drone"
-  WHERE COALESCE("last_inspection_date" >= $1::date, false) = $2)`;
+// Match M1's branch-country split, including any non-Lithuanian branch in M1-H2.
+const FRAGMENT_DRONES = `"drone_id" IN (SELECT d."drone_id" FROM "drone" d
+  JOIN "branch" b ON b."branch_id" = d."branch_id"
+  WHERE (b."country_code" = 'LT') = $1)`;
 
 const columns = (fields, skip) =>
   Object.keys(fields).filter((f) => f !== '_id' && f !== skip).map((f) => `"${f}"`).join(', ');
 
 async function main() {
-  if (!CUTOFF) throw new Error('INSPECTION_CUTOFF must be set (YYYY-MM-DD).');
-
   const pg = new Client(PG);
   const mongo = new MongoClient(MONGO_URI);
   await pg.connect();
   await mongo.connect();
 
   try {
-    for (const { db: dbName, recent } of FRAGMENTS) {
+    for (const { db: dbName, lithuania } of FRAGMENTS) {
       const db = mongo.db(dbName);
 
       for (const c of collections) {
         const { rows } = await pg.query(
           `SELECT "${c.pk}" AS _id, ${columns(c.fields, c.embed?.field)} FROM "${c.table ?? c.name}"${c.split ? ` WHERE ${FRAGMENT_DRONES}` : ''}`,
-          c.split ? [CUTOFF, recent] : [],
+          c.split ? [lithuania] : [],
         );
 
         if (c.embed) {
           const e = c.embed;
           const { rows: items } = await pg.query(
             `SELECT "drone_id", ${columns(e.fields)} FROM "${e.table}" WHERE ${FRAGMENT_DRONES} ORDER BY "${e.pk}"`,
-            [CUTOFF, recent],
+            [lithuania],
           );
           const byDrone = new Map();
           for (const { drone_id, ...item } of items) {
