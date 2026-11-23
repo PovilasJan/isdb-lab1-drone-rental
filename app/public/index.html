@@ -98,6 +98,10 @@
 
     <aside class="trace" aria-live="polite">
       <h2>Vykdymo eiga</h2>
+      <label class="fail-toggle" title="Kita rašymo operacija nepavyks patvirtinimo metu: matysis ROLLBACK ir M2 kompensacijos">
+        <input type="checkbox" id="simulate-failure">
+        <span>Imituoti gedimą kitai rašymo operacijai</span>
+      </label>
       <div id="trace-head" class="trace-head">Atlikite operaciją: čia matysis, kuriuos fragmentus ji palietė.</div>
       <ol id="trace-list"></ol>
     </aside>

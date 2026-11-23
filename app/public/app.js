@@ -16,6 +16,13 @@ let editing = null; // drone being edited, null = new drone
 
 // quiet: do not replace the trace panel (list refresh right after a write keeps the write's trace)
 async function api(method, url, body, title, { quiet = false } = {}) {
+  // "Imituoti gedimą": the next write fails at its commit point; the switch turns itself off.
+  const failSwitch = $('#simulate-failure');
+  if (method !== 'GET' && failSwitch.checked) {
+    failSwitch.checked = false;
+    url += `${url.includes('?') ? '&' : '?'}fail=1`;
+    title += ' (imituotas gedimas)';
+  }
   const res = await fetch(url, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
