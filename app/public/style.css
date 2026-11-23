@@ -110,6 +110,7 @@ td.row-actions { display: flex; gap: 4px; justify-content: flex-end; }
   display: flex; gap: 8px; align-items: center; margin: 0 0 12px; padding: 6px 8px; cursor: pointer;
   font-size: 13px; color: var(--muted); border: 1px dashed var(--line); border-radius: 6px;
 }
+.fail-toggle input { width: auto; margin: 0; flex: none; accent-color: var(--bad); }
 .fail-toggle:has(input:checked) { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); }
 .trace-head { color: var(--muted); margin-bottom: 10px; }
 .trace-head.ok { color: var(--good); font-weight: 600; }
