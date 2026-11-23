@@ -10,6 +10,8 @@ name: isdb-lab1
 services:
   dbvs1:
     image: postgres:17
+    # prepared transactions are needed for the two-phase commit across m1_lt and m1_lvee (app/)
+    command: ["postgres", "-c", "max_prepared_transactions=10"]
     environment:
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
@@ -99,6 +101,28 @@ services:
       ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@dbvs2:27017/?authSource=admin
       ME_CONFIG_BASICAUTH: "false"   # local lab only, no login prompt
     ports: ["8081:8081"]
+
+  # Lab 2: global operations over M1 + M2 (web UI on http://localhost:3000).
+  # After editing app/ code: docker compose restart app
+  app:
+    image: node:22
+    depends_on:
+      dbvs1: { condition: service_healthy }
+      dbvs2: { condition: service_healthy }
+    working_dir: /app
+    environment:
+      PG_HOST: dbvs1
+      PG_PORT: "5432"
+      PG_USER: ${PG_USER}
+      PG_PASSWORD: ${PG_PASSWORD}
+      MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@dbvs2:27017/?authSource=admin
+    ports: ["3000:3000"]
+    volumes:
+      - ./app:/app
+      - app-node-modules:/app/node_modules
+    command: ["bash", "-c", "npm install --no-audit --no-fund --silent && node server.js"]
+
 volumes:
   dbvs1-data:
   dbvs2-data:
+  app-node-modules:

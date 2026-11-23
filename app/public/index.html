@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="lt">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SkyRent – globalios operacijos</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <strong>SkyRent</strong>
+      <span>globalios operacijos</span>
+    </div>
+    <div class="legend" aria-label="Fragmentai">
+      <span class="frag-group"><span class="chip m1">m1_lt</span><span class="chip m2">M2_lt</span><small>LT</small></span>
+      <span class="frag-group"><span class="chip m1">m1_lvee</span><span class="chip m2">M2_lvee</span><small>LV + EE</small></span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="drones" aria-selected="true">Dronai <small>Povilas</small></button>
+    <button role="tab" data-tab="rentals" aria-selected="false">Nuomos <small>Lukas</small></button>
+    <button role="tab" data-tab="check" aria-selected="false">Našlaičių patikra</button>
+  </nav>
+
+  <div class="layout">
+    <main>
+      <!-- Drones -->
+      <section id="tab-drones" class="tab">
+        <form id="drone-filter" class="toolbar">
+          <label>Šalis
+            <select name="country">
+              <option value="">Visos</option>
+              <option value="LT">LT</option>
+              <option value="LV">LV</option>
+              <option value="EE">EE</option>
+            </select>
+          </label>
+          <label><span>Statusas <span class="chip m1 tiny">M1</span></span>
+            <select name="status"><option value="">Visi</option></select>
+          </label>
+          <label><span>Būklė <span class="chip m2 tiny">M2</span></span>
+            <select name="condition"><option value="">Visos</option></select>
+          </label>
+          <button type="submit">Ieškoti</button>
+          <span class="spacer"></span>
+          <button type="button" id="new-drone" class="primary">+ Naujas dronas</button>
+        </form>
+
+        <div class="table-wrap">
+          <table id="drone-table">
+            <thead>
+              <tr>
+                <th>Serijos nr. <span class="chip m2 tiny">M2</span></th>
+                <th>Modelis <span class="chip m1 tiny">M1</span></th>
+                <th>Filialas <span class="chip m1 tiny">M1</span></th>
+                <th>Statusas <span class="chip m1 tiny">M1</span></th>
+                <th class="num">€ / d. <span class="chip m1 tiny">M1</span></th>
+                <th>Būklė <span class="chip m2 tiny">M2</span></th>
+                <th class="num">Skr. val. <span class="chip m2 tiny">M2</span></th>
+                <th>Apžiūra <span class="chip m2 tiny">M2</span></th>
+                <th><span class="sr-only">Veiksmai</span></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="drone-empty" class="empty" hidden>Dronų pagal šiuos filtrus nėra.</p>
+        </div>
+      </section>
+
+      <!-- Rentals (Lukas) -->
+      <section id="tab-rentals" class="tab" hidden>
+        <div class="panel">
+          <h2>Globalus objektas „Nuoma“</h2>
+          <p>Luko dalis, dar neįgyvendinta. API maršrutai ir funkcijos <code>app/ops/rental.js</code> jau paruošti.</p>
+          <ol>
+            <li><b>Atrinkimas</b>: nuomos su klientu ir mokėjimais (M1) + skrydžiai, km ir incidentai (M2).</li>
+            <li><b>Įterpimas</b>: <code>rental</code> + <code>payment</code> į m1_X, <code>flight_log</code> su tuo pačiu <code>rental_id</code> į M2_X.</li>
+            <li><b>Redagavimas</b>: nuomos užbaigimas: statusas, mokėjimas, drono statusas (M1) + skrydžio valandos ir baterija (M2).</li>
+            <li><b>Šalinimas</b>: <code>payment</code> → <code>rental</code> (M1), jos <code>flight_log</code> (M2).</li>
+          </ol>
+          <button type="button" id="try-rentals">Išbandyti GET /api/rentals</button>
+        </div>
+      </section>
+
+      <!-- Orphan check -->
+      <section id="tab-check" class="tab" hidden>
+        <div class="panel">
+          <h2>Našlaičių patikra</h2>
+          <p>Ryšiai, kurių neužtikrina nei viena DBVS: tarp M1 ir M2, MongoDB viduje ir tarp horizontaliųjų fragmentų.
+            PostgreSQL vidaus ryšius užtikrina išoriniai raktai.</p>
+          <button type="button" id="run-check" class="primary">Paleisti patikrą</button>
+          <ul id="check-list" class="checks"></ul>
+        </div>
+      </section>
+    </main>
+
+    <aside class="trace" aria-live="polite">
+      <h2>Vykdymo eiga</h2>
+      <div id="trace-head" class="trace-head">Atlikite operaciją: čia matysis, kuriuos fragmentus ji palietė.</div>
+      <ol id="trace-list"></ol>
+    </aside>
+  </div>
+
+  <!-- Insert / update form -->
+  <dialog id="drone-dialog">
+    <form id="drone-form" method="dialog">
+      <h2 id="drone-form-title">Naujas dronas</h2>
+      <div class="parts">
+        <fieldset>
+          <legend><span class="chip m1">M1</span> drone_commercial</legend>
+          <label>Filialas <select name="branch_id" required></select></label>
+          <label>Modelis <select name="model_id" required></select></label>
+          <label>Pirkimo data <input name="purchase_date" type="date" required></label>
+          <label>Pirkimo kaina, € <input name="purchase_price" type="number" step="0.01" min="0" required></label>
+          <label>Dienos kaina, € <input name="daily_rate" type="number" step="0.01" min="0" required></label>
+          <label>Užstatas, € <input name="deposit_amount" type="number" step="0.01" min="0" required></label>
+          <label>Statusas <select name="status" required></select></label>
+        </fieldset>
+        <fieldset>
+          <legend><span class="chip m2">M2</span> drone_technical</legend>
+          <label>Serijos nr. <input name="serial_number" required maxlength="40"></label>
+          <label>Programinė įranga <input name="firmware_version" required maxlength="20"></label>
+          <label>Skrydžio valandos <input name="total_flight_hours" type="number" step="0.1" min="0" required></label>
+          <label>Baterijos ciklai <input name="battery_cycles" type="number" step="1" min="0" required></label>
+          <label>Paskutinė apžiūra <input name="last_inspection_date" type="date"></label>
+          <label>Būklė <select name="condition" required></select></label>
+        </fieldset>
+      </div>
+      <p id="drone-form-error" class="error" hidden></p>
+      <div class="actions">
+        <button type="button" data-close>Atšaukti</button>
+        <button type="submit" class="primary">Išsaugoti</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Drone card -->
+  <dialog id="card-dialog">
+    <div id="card-body"></div>
+    <div class="actions"><button type="button" data-close>Uždaryti</button></div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

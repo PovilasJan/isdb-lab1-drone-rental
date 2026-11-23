@@ -1,0 +1,15 @@
+{
+  "name": "skyrent-global",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ISDB lab 2: global operations over the M1 (PostgreSQL) and M2 (MongoDB) fragments",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "mongodb": "^6.0.0",
+    "pg": "^8.11.0"
+  }
+}

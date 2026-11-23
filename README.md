@@ -10,6 +10,8 @@ docker compose run --rm --no-deps migrate-mongo
 
 pgAdmin: http://localhost:5050 (password from `.env`). Reset: `docker compose run --rm setup`.
 
+**Lab 2 – global operations:** http://localhost:3000 (`app/`, started by `docker compose up -d`). See [docs/lab2.md](docs/lab2.md).
+
 | Database | |
 |---|---|
 | `isdb_original` | M0 – original full DB |
