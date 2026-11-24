@@ -17,7 +17,16 @@ async function lookups() {
       SELECT model_id, manufacturer, model_name, c.name AS category
       FROM drone_model JOIN drone_category c USING (category_id)
       ORDER BY manufacturer, model_name`);
-    return { branches, models, statuses: drone.STATUS, conditions: drone.CONDITION };
+    const customers = [];
+    for (const frag of KEYS) {
+      const { rows } = await g.read(frag, `
+        SELECT c.customer_id, c.first_name, c.last_name, c.country_code,
+               c.home_branch_id, b.name AS home_branch_name
+        FROM customer c JOIN branch b ON b.branch_id = c.home_branch_id
+        ORDER BY c.last_name, c.first_name`);
+      customers.push(...rows.map((c) => ({ ...c, fragment: frag })));
+    }
+    return { branches, models, customers, statuses: drone.STATUS, conditions: drone.CONDITION };
   }, { readOnly: true });
 }
 

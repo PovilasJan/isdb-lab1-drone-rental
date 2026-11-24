@@ -38,6 +38,6 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = Number(process.env.PORT ?? 3000);
-db.connect().then(() => {
+db.connect().then(() => rental.ensureSearchIndexes()).then(() => {
   app.listen(PORT, () => console.log(`SkyRent global app: http://localhost:${PORT}`));
 });

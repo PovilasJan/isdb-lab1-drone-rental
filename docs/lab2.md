@@ -73,18 +73,26 @@ dalis `drone_technical` su įterptu `maintenance[]` masyvu (M2). Abi dalys turi 
 | **Redagavimas** – `PATCH /api/drones/:id` | Keičia bet kuriuos atributus; kiekvienas rašomas ten, kur guli (M1 ar M2). Filialas kitoje šalyje perkelia droną į kitus horizontaliuosius fragmentus. | Tame pačiame fragmente: `UPDATE drone_commercial` ir/ar `updateOne drone_technical` (kompensacija: senos reikšmės). Perkėlimas X → Y: `INSERT` į `m1_Y`, `DELETE` iš `m1_X` (2PC), `drone_technical` ir jo `flight_log` perkeliami iš `M2_X` į `M2_Y`. Dronas su nuomomis neperkeliamas: nuomos priklauso senajam filialui ir lieka `m1_X`, o ten jų FK reikalauja drono. |
 | **Šalinimas** – `DELETE /api/drones/:id` | Pašalina droną ir viską, kas nuo jo priklauso. | Vaikai pirma: M1 `payment` → `rental` → `drone_commercial`; M2 `flight_log` (drono arba jo nuomų) → `drone_technical` (apžiūros išsitrina kartu, nes įterptos). Po to našlaičių patikra rodo, kad nieko neliko. |
 
-## Lukas – globalus objektas „Nuoma“ (dar neįgyvendinta)
+## Lukas – globalus objektas „Nuoma“
 
 `rental` + `payment` (M1) ir `flight_log` (M2), susieti per `rental_id`. Fragmentą nustato nuomos filialas;
-M1 išoriniai raktai reikalauja, kad klientas ir dronas būtų tame pačiame fragmente. Planas ir naudotini
-pagalbininkai aprašyti `app/ops/rental.js`; maršrutai `server.js` ir skirtukas „Nuomos“ jau paruošti.
+M1 išoriniai raktai reikalauja, kad klientas ir dronas būtų tame pačiame fragmente.
 
-| Operacija | Planas |
+Nuomų sąraše `maintenance_search` filtras ieško išnuomoto drono įterptų apžiūrų aprašymuose
+naudodamas MongoDB `$text` (pvz., `GET /api/rentals?maintenance_search=battery`). Jį galima
+derinti su šalies, nuomos statuso ir incidentų filtrais. Tai ieško drono apžiūrų istorijoje,
+ne pačios nuomos tekste. Programos paleidimo metu abiejuose M2 fragmentuose sukuriamas
+`maintenance.description` tekstinis indeksas su `default_language: 'none'`. Po MongoDB migracijos,
+kuri atkuria kolekcijas, reikia iš naujo paleisti programą (`docker compose restart app`);
+migracijos vien dėl indekso kartoti nereikia.
+Mygtukas „Apžiūros“ prie nuomos atveria jos drono kortelę su apžiūrų aprašymais.
+
+| Operacija | Veiksmas |
 |---|---|
-| Atrinkimas | Nuomos su klientu, dronu ir sumokėta suma (M1) + skrydžių skaičius, km, incidentai (M2 `flight_log`) ir drono būklė (M2). |
+| Atrinkimas | Nuomos su klientu ir drono modeliu (M1), skrydžių skaičiumi ir incidentų filtru (M2); pasirinktinai ieškoma drono apžiūrų aprašymuose. |
 | Įterpimas | `rental` + mokėjimai į `m1_X`, `flight_log` su tuo pačiu `rental_id` į `M2_X`. |
 | Redagavimas | Nuomos užbaigimas: statusas, `rental_fee` mokėjimas, drono statusas (M1) + `total_flight_hours`, `battery_cycles`, po incidento `condition` (M2). |
-| Šalinimas | `payment` → `rental` (M1), jos `flight_log` (M2), tada našlaičių patikra. |
+| Šalinimas | `payment` → `rental` (M1), jos `flight_log` (M2); našlaičių patikrą galima paleisti atskirai. |
 
 ## Žinomi apribojimai
 

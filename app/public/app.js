@@ -4,6 +4,7 @@ const $ = (sel, el = document) => el.querySelector(sel);
 
 const STATUS_LT = { available: 'laisvas', rented: 'išnuomotas', maintenance: 'remontas', retired: 'nurašytas' };
 const COND_LT = { excellent: 'puiki', good: 'gera', fair: 'patenkinama', poor: 'prasta' };
+const RENTAL_STATUS_LT = { reserved: 'užsakyta', active: 'aktyvi', completed: 'užbaigta', cancelled: 'atšaukta' };
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const eur = (n) => (n == null ? '–' : `${Number(n).toFixed(2)} €`);
@@ -11,6 +12,8 @@ const eur = (n) => (n == null ? '–' : `${Number(n).toFixed(2)} €`);
 let lookups = null;
 let drones = [];
 let editing = null; // drone being edited, null = new drone
+let rentals = [];
+let finishingRental = null;
 
 // ------------------------------------------------------------------ API + trace
 
@@ -79,6 +82,11 @@ async function loadLookups() {
       `<option value="${b.branch_id}">${esc(b.name)}</option>`).join('')}</optgroup>`).join(''));
   fillSelect(f.model_id, lookups.models.map((m) =>
     `<option value="${m.model_id}">${esc(m.manufacturer)} ${esc(m.model_name)} · ${esc(m.category)}</option>`).join(''));
+
+  const rf = $('#rental-form');
+  fillSelect(rf.branch_id, Object.entries(byCountry).map(([cc, list]) =>
+    `<optgroup label="${cc} → ${list[0].fragment}">${list.map((b) =>
+      `<option value="${b.branch_id}">${esc(b.name)}</option>`).join('')}</optgroup>`).join(''));
 }
 
 async function loadDrones({ quiet = false } = {}) {
@@ -126,7 +134,7 @@ $('#drone-table').addEventListener('click', (e) => {
 async function openCard(d) {
   let data;
   try {
-    data = await api('GET', `/api/drones/${d.drone_id}`, null, `Atrinkimas: drono kortelė ${d.serial_number}`);
+    data = await api('GET', `/api/drones/${d.drone_id}`, null, `Atrinkimas: drono kortelė ${d.serial_number ?? d.model}`);
   } catch { return; }
   const x = data.drone;
   const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
@@ -247,7 +255,191 @@ async function deleteDrone(d) {
 
 // ------------------------------------------------------------------ rentals (Lukas)
 
-$('#try-rentals').addEventListener('click', () => api('GET', '/api/rentals', null, 'Nuomų atrinkimas').catch(() => {}));
+async function loadRentals({ quiet = false } = {}) {
+  const params = new URLSearchParams(new FormData($('#rental-filter')));
+  for (const [k, v] of [...params]) if (!v) params.delete(k);
+  const label = [...params.values()].join(', ') || 'be filtrų';
+  rentals = await api('GET', `/api/rentals?${params}`, null, `Atrinkimas: nuomos (${label})`, { quiet });
+  renderRentals();
+}
+
+function renderRentals() {
+  $('#rental-empty').hidden = rentals.length > 0;
+  $('#rental-table tbody').innerHTML = rentals.map((r) => `
+    <tr data-id="${r.rental_id}">
+      <td>${esc(r.customer)}</td>
+      <td>${esc(r.model)}</td>
+      <td title="${esc(r.branch_name)}">${esc(r.branch_name.replace(/^SkyRent /, ''))} <span class="sub">${r.country_code}</span>
+        <span class="chip gl tiny">${r.fragment}</span></td>
+      <td>${r.start_date}</td>
+      <td>${r.end_date}</td>
+      <td><span class="rental-status rental-status-${r.status}">${RENTAL_STATUS_LT[r.status]}</span></td>
+      <td class="num">${eur(r.total_price)}</td>
+      <td class="num">${r.flight_count}</td>
+      <td class="row-actions">
+        <button class="small" data-act="maintenance">Apžiūros</button>
+        ${r.status === 'reserved' || r.status === 'active'
+          ? '<button class="small" data-act="finish">Užbaigti</button>' : ''}
+        <button class="small danger" data-act="delete">Šalinti</button>
+      </td>
+    </tr>`).join('');
+}
+
+$('#rental-filter').addEventListener('submit', (e) => {
+  e.preventDefault();
+  loadRentals().catch(() => {});
+});
+
+$('#rental-table').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const rental = rentals.find((r) => r.rental_id === btn.closest('tr').dataset.id);
+  if (btn.dataset.act === 'maintenance') openCard(rental);
+  if (btn.dataset.act === 'finish') openFinishRental(rental);
+  if (btn.dataset.act === 'delete') deleteRental(rental);
+});
+
+async function refreshRentalFormOptions() {
+  const f = $('#rental-form');
+  const branch = lookups.branches.find((b) => b.branch_id === f.branch_id.value);
+  if (!branch) return;
+
+  const customers = (lookups.customers ?? []).filter((c) => c.fragment === branch.fragment);
+  fillSelect(f.customer_id, customers.map((c) =>
+    `<option value="${c.customer_id}">${esc(c.first_name)} ${esc(c.last_name)} · #${c.customer_id}</option>`).join(''));
+
+  let available = [];
+  try {
+    available = await api('GET',
+      `/api/drones?country=${encodeURIComponent(branch.country_code)}&status=available`,
+      null, `Atrinkimas: laisvi dronai ${branch.country_code}`, { quiet: true });
+  } catch { /* shown if a write form is submitted; keep the branch options usable */ }
+  available = available.filter((d) => d.branch_id === branch.branch_id);
+  fillSelect(f.drone_id, available.map((d) =>
+    `<option value="${d.drone_id}">${esc(d.serial_number)} · ${esc(d.model)}</option>`).join(''));
+  f.drone_id.disabled = available.length === 0;
+  if (!available.length) {
+    f.drone_id.innerHTML = '<option value="">Nėra laisvų dronų šiame filiale</option>';
+  }
+}
+
+function openRentalForm() {
+  const f = $('#rental-form');
+  f.reset();
+  f.drone_id.disabled = false;
+  $('#rental-form-error').hidden = true;
+  $('#flight-fields').hidden = true;
+  for (const name of ['started_at', 'duration_min', 'max_altitude_m', 'distance_km', 'battery_used_pct']) {
+    f[name].required = false;
+  }
+  f.status.value = 'active';
+  const today = new Date();
+  f.start_date.value = today.toISOString().slice(0, 10);
+  today.setDate(today.getDate() + 1);
+  f.end_date.value = today.toISOString().slice(0, 10);
+  f.branch_id.value = lookups.branches[0].branch_id;
+  refreshRentalFormOptions();
+  $('#rental-dialog').showModal();
+}
+
+$('#new-rental').addEventListener('click', openRentalForm);
+$('#rental-form [name=branch_id]').addEventListener('change', refreshRentalFormOptions);
+$('#rental-form [name=add_flight]').addEventListener('change', (e) => {
+  $('#flight-fields').hidden = !e.target.checked;
+  for (const name of ['started_at', 'duration_min', 'max_altitude_m', 'distance_km', 'battery_used_pct']) {
+    $('#rental-form [name=' + name + ']').required = e.target.checked;
+  }
+});
+
+$('#rental-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = $('#rental-form');
+  const err = $('#rental-form-error');
+  err.hidden = true;
+
+  const body = {
+    customer_id: Number(f.customer_id.value),
+    drone_id: f.drone_id.value,
+    branch_id: f.branch_id.value,
+    start_date: f.start_date.value,
+    end_date: f.end_date.value,
+    status: f.status.value,
+  };
+  if (f.total_price.value !== '') body.total_price = Number(f.total_price.value);
+
+  if (f.payment_amount.value !== '') {
+    body.payments = [{
+      amount: Number(f.payment_amount.value),
+      method: f.payment_method.value,
+      payment_type: 'deposit',
+    }];
+  }
+
+  if (f.add_flight.checked) {
+    body.flights = [{
+      started_at: f.started_at.value ? new Date(f.started_at.value).toISOString() : '',
+      duration_min: Number(f.duration_min.value),
+      max_altitude_m: Number(f.max_altitude_m.value),
+      distance_km: Number(f.distance_km.value),
+      battery_used_pct: Number(f.battery_used_pct.value),
+      incident_reported: f.incident_reported.checked,
+    }];
+  }
+
+  try {
+    if (!body.drone_id) throw new Error('Šiame filiale nėra laisvo drono');
+    await api('POST', '/api/rentals', body, 'Įterpimas: nauja nuoma');
+    $('#rental-dialog').close();
+    await loadRentals({ quiet: true }).catch(() => {});
+  } catch (ex) {
+    err.textContent = ex.message;
+    err.hidden = false;
+  }
+});
+
+function openFinishRental(rental) {
+  finishingRental = rental;
+  const f = $('#finish-form');
+  f.reset();
+  $('#finish-form-error').hidden = true;
+  f.rental_fee.value = rental.total_price;
+  $('#finish-title').textContent =
+    `Užbaigti nuomą: ${rental.customer} · ${rental.serial_number ?? rental.model}`;
+  $('#finish-dialog').showModal();
+}
+
+$('#finish-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = $('#finish-form');
+  const err = $('#finish-form-error');
+  err.hidden = true;
+  const body = { payment_method: f.payment_method.value };
+  if (f.rental_fee.value !== '') body.rental_fee = Number(f.rental_fee.value);
+  if (f.damage_fee.value !== '') body.damage_fee = Number(f.damage_fee.value);
+  if (f.condition.value !== '') body.condition = f.condition.value;
+
+  try {
+    await api('PATCH', `/api/rentals/${finishingRental.rental_id}`, body,
+      `Redagavimas: užbaigta nuoma ${finishingRental.rental_id}`);
+    $('#finish-dialog').close();
+    await loadRentals({ quiet: true }).catch(() => {});
+  } catch (ex) {
+    err.textContent = ex.message;
+    err.hidden = false;
+  }
+});
+
+async function deleteRental(rental) {
+  if (!confirm(`Pašalinti nuomą ${rental.rental_id} kartu su mokėjimais ir skrydžiais?`)) return;
+  try {
+    const r = await api('DELETE', `/api/rentals/${rental.rental_id}`, null,
+      `Šalinimas: nuoma ${rental.rental_id}`);
+    const del = r.deleted;
+    $('#trace-head').textContent += `. Pašalinta: ${del.payment} payment, ${del.rental} rental, ` +
+      `${del.flight_log} flight_log (M2_${r.fragment}).`;
+    await loadRentals({ quiet: true });
+  } catch { /* shown in the trace */ }
+}
 
 // ------------------------------------------------------------------ orphan check
 
@@ -265,4 +457,7 @@ $('#run-check').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ start
 
-loadLookups().then(loadDrones).catch(() => {});
+loadLookups().then(async () => {
+  await loadDrones();
+  await loadRentals();
+}).catch(() => {});

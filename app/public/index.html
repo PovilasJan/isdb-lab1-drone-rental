@@ -71,16 +71,55 @@
 
       <!-- Rentals (Lukas) -->
       <section id="tab-rentals" class="tab" hidden>
-        <div class="panel">
-          <h2>Globalus objektas „Nuoma“</h2>
-          <p>Luko dalis, dar neįgyvendinta. API maršrutai ir funkcijos <code>app/ops/rental.js</code> jau paruošti.</p>
-          <ol>
-            <li><b>Atrinkimas</b>: nuomos su klientu ir mokėjimais (M1) + skrydžiai, km ir incidentai (M2).</li>
-            <li><b>Įterpimas</b>: <code>rental</code> + <code>payment</code> į m1_X, <code>flight_log</code> su tuo pačiu <code>rental_id</code> į M2_X.</li>
-            <li><b>Redagavimas</b>: nuomos užbaigimas: statusas, mokėjimas, drono statusas (M1) + skrydžio valandos ir baterija (M2).</li>
-            <li><b>Šalinimas</b>: <code>payment</code> → <code>rental</code> (M1), jos <code>flight_log</code> (M2).</li>
-          </ol>
-          <button type="button" id="try-rentals">Išbandyti GET /api/rentals</button>
+        <form id="rental-filter" class="toolbar">
+          <label>Šalis
+            <select name="country">
+              <option value="">Visos</option>
+              <option value="LT">LT</option>
+              <option value="LV">LV</option>
+              <option value="EE">EE</option>
+            </select>
+          </label>
+          <label>Statusas
+            <select name="status">
+              <option value="">Visi</option>
+              <option value="reserved">užsakyta</option>
+              <option value="active">aktyvi</option>
+              <option value="completed">užbaigta</option>
+              <option value="cancelled">atšaukta</option>
+            </select>
+          </label>
+          <label><span>Incidentai <span class="chip m2 tiny">M2</span></span>
+            <select name="incident">
+              <option value="">Visos</option>
+              <option value="true">tik su incidentu</option>
+            </select>
+          </label>
+          <label><span>Drono apžiūros aprašymas <span class="chip m2 tiny">M2</span></span>
+            <input name="maintenance_search" type="search" placeholder="pvz. battery">
+          </label>
+          <button type="submit">Ieškoti</button>
+          <span class="spacer"></span>
+          <button type="button" id="new-rental" class="primary">+ Nauja nuoma</button>
+        </form>
+        <div class="table-wrap">
+          <table id="rental-table">
+            <thead>
+              <tr>
+                <th>Klientas <span class="chip m1 tiny">M1</span></th>
+                <th>Modelis <span class="chip m2 tiny">M2</span></th>
+                <th>Filialas <span class="chip m1 tiny">M1</span></th>
+                <th>Pradžios data</th>
+                <th>Pabaigos data</th>
+                <th>Statusas</th>
+                <th class="num">Kaina</th>
+                <th class="num">Skrydžiai</th>
+                <th>Veiksmai</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="rental-empty" class="empty" hidden>Nuomų pagal šiuos filtrus nėra.</p>
         </div>
       </section>
 
@@ -132,6 +171,88 @@
       <div class="actions">
         <button type="button" data-close>Atšaukti</button>
         <button type="submit" class="primary">Išsaugoti</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Rental insert -->
+  <dialog id="rental-dialog">
+    <form id="rental-form" method="dialog">
+      <h2>Nauja nuoma</h2>
+      <div class="parts">
+        <fieldset>
+          <legend><span class="chip m1">M1</span> nuoma ir mokėjimai</legend>
+          <label>Filialas <select name="branch_id" required></select></label>
+          <label>Klientas <select name="customer_id" required></select></label>
+          <label>Dronas <select name="drone_id" required></select></label>
+          <label>Pradžia <input name="start_date" type="date" required></label>
+          <label>Pabaiga <input name="end_date" type="date" required></label>
+          <label>Statusas
+            <select name="status" required>
+              <option value="active">Aktyvi (droną pažymi kaip išnuomotą)</option>
+              <option value="reserved">Užsakyta</option>
+              <option value="completed">Užbaigta</option>
+            </select>
+          </label>
+          <label>Bendra kaina, € <input name="total_price" type="number" step="0.01" min="0"></label>
+          <label>Mokėjimo būdas
+            <select name="payment_method">
+              <option value="card">kortelė</option>
+              <option value="bank_transfer">bankinis pavedimas</option>
+              <option value="cash">grynieji</option>
+              <option value="paypal">PayPal</option>
+            </select>
+          </label>
+          <label>Pradinis mokėjimas, € <input name="payment_amount" type="number" step="0.01" min="0.01"></label>
+        </fieldset>
+        <fieldset>
+          <legend><span class="chip m2">M2</span> pradinis flight_log</legend>
+          <label class="check-label"><input name="add_flight" type="checkbox"> Įtraukti skrydį</label>
+          <div id="flight-fields" class="flight-fields" hidden>
+            <label>Pradžios laikas <input name="started_at" type="datetime-local"></label>
+            <label>Trukmė, min <input name="duration_min" type="number" step="1" min="1"></label>
+            <label>Maks. aukštis, m <input name="max_altitude_m" type="number" step="1" min="0" max="120"></label>
+            <label>Atstumas, km <input name="distance_km" type="number" step="0.01" min="0"></label>
+            <label>Baterijos naudojimas, % <input name="battery_used_pct" type="number" step="1" min="1" max="100"></label>
+            <label class="check-label"><input name="incident_reported" type="checkbox"> Užfiksuotas incidentas</label>
+          </div>
+        </fieldset>
+      </div>
+      <p id="rental-form-error" class="error" hidden></p>
+      <div class="actions">
+        <button type="button" data-close>Atšaukti</button>
+        <button type="submit" class="primary">Išsaugoti</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Finish rental -->
+  <dialog id="finish-dialog">
+    <form id="finish-form" method="dialog">
+      <h2 id="finish-title">Užbaigti nuomą</h2>
+      <div class="finish-fields">
+        <label>Mokėjimo būdas
+          <select name="payment_method">
+            <option value="card">kortelė</option>
+            <option value="bank_transfer">bankinis pavedimas</option>
+            <option value="cash">grynieji</option>
+            <option value="paypal">PayPal</option>
+          </select>
+        </label>
+        <label>Bendra nuomos mokestis, € <input name="rental_fee" type="number" step="0.01" min="0.01"></label>
+        <label>Žalos mokestis, € <input name="damage_fee" type="number" step="0.01" min="0.01"></label>
+        <label>Drono būklė <select name="condition">
+          <option value="">Automatiškai incidento atveju</option>
+          <option value="excellent">puiki</option>
+          <option value="good">gera</option>
+          <option value="fair">patenkinama</option>
+          <option value="poor">prasta</option>
+        </select></label>
+      </div>
+      <p id="finish-form-error" class="error" hidden></p>
+      <div class="actions">
+        <button type="button" data-close>Atšaukti</button>
+        <button type="submit" class="primary">Užbaigti ir sumokėti</button>
       </div>
     </form>
   </dialog>
