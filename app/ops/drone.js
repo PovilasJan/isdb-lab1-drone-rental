@@ -222,8 +222,10 @@ async function get(droneId) {
 
 // ---------------------------------------------------------------- 2. INSERT
 
+// opts of the write operations: { simulateFailure } - demo of a failed commit, see lib/global-op.js.
+
 // New drone: one UUID, M1 part into the branch's m1_X, M2 part into M2_X.
-async function insert(input) {
+async function insert(input, opts = {}) {
   const { m1, m2 } = splitDrone(input, { partial: false });
 
   return runGlobal(async (g) => {
@@ -243,7 +245,7 @@ async function insert(input) {
       (db) => db.collection('drone_technical').deleteOne({ _id: droneId }));
 
     return { drone_id: droneId, fragment: frag };
-  });
+  }, opts);
 }
 
 // ---------------------------------------------------------------- 3. UPDATE
@@ -253,7 +255,7 @@ async function insert(input) {
 // drone_commercial m1_X -> m1_Y (two PostgreSQL databases -> two-phase commit) and
 // drone_technical + its flight logs M2_X -> M2_Y. A drone with rentals cannot move:
 // the rentals belong to the old branch and stay in m1_X, where their FK needs the drone.
-async function update(droneId, input) {
+async function update(droneId, input, opts = {}) {
   const { m1, m2 } = splitDrone(input, { partial: true });
   if (!Object.keys(m1).length && !Object.keys(m2).length) throw badRequest('Nėra ką keisti');
 
@@ -324,7 +326,7 @@ async function update(droneId, input) {
       (db) => db.collection('drone_technical').insertOne(before));
 
     return { drone_id: droneId, from: src, to: dst, moved: true, flight_logs_moved: flights.length };
-  });
+  }, opts);
 }
 
 // ---------------------------------------------------------------- 4. DELETE
@@ -332,7 +334,7 @@ async function update(droneId, input) {
 // Deletes the drone from M1 and M2 with everything that depends on it, children first,
 // so no orphan is left: payment -> rental -> drone_commercial (M1),
 // flight_log (of the drone or of its rentals) -> drone_technical with its maintenance (M2).
-async function remove(droneId) {
+async function remove(droneId, opts = {}) {
   return runGlobal(async (g) => {
     const frag = await locateDrone(g, droneId);
 
@@ -373,7 +375,7 @@ async function remove(droneId) {
         maintenance: doc ? doc.maintenance.length : 0,
       },
     };
-  });
+  }, opts);
 }
 
 module.exports = { list, get, insert, update, remove, STATUS, CONDITION };

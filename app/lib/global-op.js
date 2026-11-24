@@ -20,14 +20,21 @@
 //                         then COMMIT PREPARED on both (phase 2).
 //   - Any error before the commit point: ROLLBACK every M1 transaction and run the M2
 //     compensations in reverse order.
+//
+// simulateFailure (demonstration only, "Imituoti gedimą" in the UI): the commit fails as if
+// a participant could not commit. One M1 fragment: the error comes instead of COMMIT.
+// Two M1 fragments: the last one "votes no" in phase 1, after the others have prepared.
 const { randomUUID } = require('crypto');
 const { FRAGMENTS } = require('./db');
+const { HttpError } = require('./errors');
 
 const oneLine = (sql) => sql.replace(/\s+/g, ' ').trim();
+const simulated = (where) => new HttpError(503, `Imituotas gedimas: ${where}`);
 
 class GlobalOp {
-  constructor({ readOnly = false } = {}) {
+  constructor({ readOnly = false, simulateFailure = false } = {}) {
     this.readOnly = readOnly;
+    this.simulateFailure = simulateFailure && !readOnly;
     this.trace = [];
     this.clients = new Map(); // fragment key -> pg client with an open transaction
     this.undo = [];           // M2 compensations, run in reverse on failure
@@ -77,6 +84,9 @@ class GlobalOp {
 
   async commit() {
     const open = [...this.clients.entries()];
+    if (open.length <= 1 && this.simulateFailure) {
+      throw simulated(open.length ? `${FRAGMENTS[open[0][0]].m1Name} negali įvykdyti COMMIT` : 'prieš patvirtinimą');
+    }
     if (open.length === 1) {
       const [frag, client] = open[0];
       await client.query('COMMIT');
@@ -89,7 +99,10 @@ class GlobalOp {
       // transaction back by itself; the ones already prepared are rolled back here.
       const prepared = [];
       try {
-        for (const [frag, client] of open) {
+        for (const [i, [frag, client]] of open.entries()) {
+          if (this.simulateFailure && i === open.length - 1) {
+            throw simulated(`${FRAGMENTS[frag].m1Name} 1 fazėje atsako „negaliu“`);
+          }
           await client.query(`PREPARE TRANSACTION '${gid}_${frag}'`);
           prepared.push(frag);
           this.log(FRAGMENTS[frag].m1Name, '1 fazė: PREPARE TRANSACTION');
